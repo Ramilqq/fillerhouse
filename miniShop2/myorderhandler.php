@@ -52,6 +52,7 @@ class myOrderHandler extends msOrderHandler {
             'order' => $this,
         ));
         
+        $toxins = $this->getToxinGroup($value);
         
         $properties = [];
         foreach ($data as $key => $value){
@@ -151,6 +152,8 @@ class myOrderHandler extends msOrderHandler {
                 if ($parent == 587 and $cart_cost < 100){
                     return $this->error('Free of charge order requires more than $100');
                 }
+                
+                if (!array_key_exists('propfld_ise_box', $properties) and in_array($parent, $toxins)) return $this->error('Select ise box option');
             }
         }
         
@@ -265,4 +268,13 @@ class myOrderHandler extends msOrderHandler {
         $value = in_array($value, $country);
         return $value;
     }
+    
+    public function getToxinGroup() {
+        return [238, 673, 3];
+    }
+    
+    public function getIseBoxId() {
+        return 787;
+    }
+    
 }
