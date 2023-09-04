@@ -83,7 +83,8 @@ class myCartHandler extends msCartHandler {
             $options = $response['data']['options'];
             $discount_price = $oldPrice > 0 ? $oldPrice - $price : 0;
             $discount_cost = $discount_price * $count;
-
+            $parent = $product->get('parent');
+            
             $key = md5($id . $price . $weight . (json_encode($options)));
             if (array_key_exists($key, $this->cart)) {
                 return $this->change($key, $this->cart[$key]['count'] + $count);
@@ -94,6 +95,7 @@ class myCartHandler extends msCartHandler {
                 }
                 $this->cart[$key] = array(
                     'id' => $id,
+                    'parent' => $parent,
                     'price' => $price,
                     'old_price' => $oldPrice,
                     'discount_price' => $discount_price,
@@ -115,4 +117,42 @@ class myCartHandler extends msCartHandler {
 
         return $this->error('ms2_cart_add_err_nf', $this->status());
     }
+    
+    public function remove($key)
+    {
+        if (array_key_exists($key, $this->cart)) {
+            $response = $this->ms2->invokeEvent('msOnBeforeRemoveFromCart', array('key' => $key, 'cart' => $this));
+            if (!$response['success']) {
+                return $this->error($response['message']);
+            }
+            
+            unset($this->cart[$key]);
+            
+            //удаление айс бокс при удаление токсинов
+            $group = [];
+            foreach ($this->cart as $k => $v){
+                if (in_array($v['parent'], $this->ms2->order->getToxinGroup())) $group[] = $v['parent'];
+            }
+            if (count($group) == 0){
+                foreach ($this->cart as $k => $v){
+                    if ($v['id'] == $this->ms2->order->getIseBoxId()) {
+                        $_SESSION['minishop2']['order']['propfld_ise_box'] = '';
+                        unset($this->cart[$k]);
+                    }
+                }
+            }
+            //!удаление айс бокс при удаление токсинов
+            
+            $response = $this->ms2->invokeEvent('msOnRemoveFromCart', array('key' => $key, 'cart' => $this));
+            if (!$response['success']) {
+                return $this->error($response['message']);
+            }
+
+            return $this->success('ms2_cart_remove_success', $this->status());
+        } else {
+            return $this->error('ms2_cart_remove_error');
+        }
+    }
+    
+    
 }
