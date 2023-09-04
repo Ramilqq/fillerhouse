@@ -37,7 +37,7 @@ class deliveryPriceCity extends msDeliveryHandler implements msDeliveryInterface
         
         /*if ($card_deliv == 0){
             return $cost + 0;
-        }else*/if(($country == 'Italy' or $country == 'Spain Espana') and (($cart_cost < $freedeliverysumm and !$card_add) or ($card_deliv < $freedeliverysumm and $card_add)) ){
+        }else*/if(($country == 'Italy' or $country == 'Spain Espana' or $country == 'Ireland') and (($cart_cost < $freedeliverysumm and !$card_add) or ($card_deliv < $freedeliverysumm and $card_add)) ){
             return $cost + 59;
         }elseif ($card_deliv < $freedeliverysumm and $card_add) {
             $cost = $cost + $delivery->get('price');
