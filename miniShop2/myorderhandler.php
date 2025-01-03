@@ -2,6 +2,12 @@
 class myOrderHandler extends msOrderHandler {
     public function validate($key, $value) {
         
+        $order = $this->ms2->order->get();
+        
+        //$this->modx->log(modX::LOG_LEVEL_ERROR, 'ms2->order->get' . print_r($order, 1));
+        
+        
+        
         if ($key == 'propfld_ise_box' and $value == 'yes'){
             $ise_box = false;
             $cart = $this->ms2->cart->get();
@@ -30,17 +36,31 @@ class myOrderHandler extends msOrderHandler {
                 // меняем filter_var() на простую регулярку
                 $value = filter_var($value, FILTER_VALIDATE_EMAIL) ? $value : @$this->order[$key];
             break;
+            case 'rpl_email':
+                // меняем filter_var() на простую регулярку
+                $value = filter_var($value, FILTER_VALIDATE_EMAIL) ? $value : @$this->order[$key];
+            break;
             case 'country':
                 // меняем filter_var() на простую регулярку
                 $value = $this->countryArray($value) ? $value : @$this->order[$key];
             break;
+            
+            /*case 'request_name':
+                if ($order['payment'] == 25 and $key == 'request_name' and $value == ''){
+                    $value = false;
+                }
+            break;*/
+            
             default:
                 return parent::validate($key, $value);
         }
         if ($value === false) {
             $value = '';
         }
-
+        
+        
+        
+        
         return $value;
     }
     
@@ -53,6 +73,7 @@ class myOrderHandler extends msOrderHandler {
         ));
         
         $toxins = $this->getToxinGroup($value);
+        $addr_comment = '';
         
         $properties = [];
         foreach ($data as $key => $value){
@@ -67,6 +88,9 @@ class myOrderHandler extends msOrderHandler {
             $this->order['properties'] = json_encode($properties);
         }
 
+        if ($this->countryArray($data['country']) and ($data['country'] != 'United Kingdom' and $data['country'] != 'Spain Espana' and $data['country'] != 'Canada') and $this->order['delivery'] == 3){
+            return $this->error('Choose the right delivery');
+        }
         
         if (!$response['success']) {
             return $this->error($response['message']);
@@ -79,7 +103,10 @@ class myOrderHandler extends msOrderHandler {
             return $this->error('Select a Payment Method');
         }
         
+        
+        
         $response = $this->getDeliveryRequiresFields();
+        
         if ($this->ms2->config['json_response']) {
             $response = json_decode($response, true);
         }
@@ -87,7 +114,18 @@ class myOrderHandler extends msOrderHandler {
             return $this->error($response['message']);
         }
         $requires = $response['data']['requires'];
-
+        
+        // добавление обязательных полей к методу оплаты
+        if ($data['payment'] == 26){
+            $requires = array_merge($requires, ['rpl_first_name', 'rpl_last_name', 'rpl_country_card', 'rpl_email']);
+            
+            $addr_comment = 'First name: ' . $this->order['rpl_first_name'] . '<br />' .
+                            'Last name: ' . $this->order['rpl_last_name'] . '<br />' .
+                            'Country card: ' . $this->order['rpl_country_card'] . '<br />' .
+                            'Email: ' . $this->order['rpl_email'] . '<br />';
+        }
+        // !добавление обязательных полей к методу оплаты
+        
         $errors = array();
         foreach ($requires as $v) {
             if (!empty($v) && empty($this->order[$v])) {
@@ -125,6 +163,7 @@ class myOrderHandler extends msOrderHandler {
             'cost' => $cart_cost + $delivery_cost,
             'status' => 0,
             'context' => $this->ms2->config['ctx'],
+            
         ));
 
         // Adding address
@@ -133,6 +172,7 @@ class myOrderHandler extends msOrderHandler {
         $address->fromArray(array_merge($this->order, array(
             'user_id' => $user_id,
             'createdon' => $createdon,
+            'comment' => $addr_comment
         )));
         $order->addOne($address);
 
@@ -170,10 +210,46 @@ class myOrderHandler extends msOrderHandler {
                 'name' => $name,
                 'cost' => $v['price'] * $v['count'],
             )));
+            
+            if($item_product = $this->modx->getObject('msProduct', $v['id'])){
+                if($category = $this->modx->getObject('msCategory', $item_product->get('parent'))){
+                    $item_category = $category->get('pagetitle');
+                }else{
+                    $item_category = '';
+                }
+            }else{
+                $item_category = '';
+            }
+            $items[] = [
+                'item_id' => $v['id'],
+                'item_name' => $name,
+                'coupon' => '',
+                'discount' => '',
+                'affiliation' => '',
+                'item_brand' => '',
+                'item_category' => $item_category,
+                'item_variant' => '',
+                'price' => $v['price'],
+                'currency' => 'USD',
+                'quantity' => $v['count'],
+            ];
+            
             $products[] = $product;
         }
         $order->addMany($products);
-
+        
+        $analitics = [
+            'event' => 'purchase',
+            'affiliation' => 'Fillerhouse',
+            'coupon' => '',
+            'currency' => 'USD',
+            'items' => $items,
+            'transaction_id' => $order->get('num'),
+            'shipping' => $order->get('delivery_cost'),
+            'value' => $order->get('cart_cost'),
+            'tax' => '',
+        ];
+        
         $response = $this->ms2->invokeEvent('msOnBeforeCreateOrder', array(
             'msOrder' => $order,
             'order' => $this,
@@ -223,6 +299,15 @@ class myOrderHandler extends msOrderHandler {
                 )
             ) {
                 $response = $payment->send($order);
+                
+                if (is_array($response)){
+                    $response['data']['analitics'] = $analitics;
+                }else{
+                    $response = json_decode($response, 1);
+                    $response['data']['analitics'] = $analitics;
+                    $response = json_encode($response);
+                }
+                
                 if ($this->config['json_response']) {
                     @session_write_close();
                     exit(is_array($response) ? json_encode($response) : $response);
