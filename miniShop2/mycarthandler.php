@@ -86,6 +86,34 @@ class myCartHandler extends msCartHandler {
             $parent = $product->get('parent');
             
             $key = md5($id . $price . $weight . (json_encode($options)));
+            
+            //analitics
+            if($category = $this->modx->getObject('msCategory', $parent)){
+                $item_category = $category->get('pagetitle');
+            }else{
+                $item_category = '';
+            }
+            $analitics = [
+                'event' => 'add_to_cart',
+                'affiliation' => 'Fillerhouse',
+                'value' => '',
+                'currency' => 'USD',
+                'items' => [
+                            'item_id' => $id,
+                            'item_name' => $product->get('pagetitle'),
+                            'coupon' => '',
+                            'discount' => '',
+                            'affiliation' => '',
+                            'item_brand' => '',
+                            'item_category' => $item_category,
+                            'item_variant' => '',
+                            'price' => $price,
+                            'currency' => 'USD',
+                            'quantity' => $count,
+                ],
+            ];
+            //!analitics
+            
             if (array_key_exists($key, $this->cart)) {
                 return $this->change($key, $this->cart[$key]['count'] + $count);
             } else {
@@ -105,12 +133,13 @@ class myCartHandler extends msCartHandler {
                     'options' => $options,
                     'ctx' => $ctx_key,
                 );
+        
                 $response = $this->ms2->invokeEvent('msOnAddToCart', array('key' => $key, 'cart' => $this));
                 if (!$response['success']) {
                     return $this->error($response['message']);
                 }
 
-                return $this->success('ms2_cart_add_success', $this->status(array('key' => $key)),
+                return $this->success('ms2_cart_add_success', $this->status(array('key' => $key, 'analitics' => $analitics)),
                     array('count' => $count));
             }
         }
@@ -126,6 +155,37 @@ class myCartHandler extends msCartHandler {
                 return $this->error($response['message']);
             }
             
+            //analitics
+            if($category = $this->modx->getObject('msCategory', $this->cart[$key]['parent'])){
+                $item_category = $category->get('pagetitle');
+            }else{
+                $item_category = '';
+            }
+            if($product = $this->modx->getObject('msProduct', $this->cart[$key]['id'])){
+                $analitics = [
+                    'event' => 'remove_from_cart',
+                    'affiliation' => 'Fillerhouse',
+                    'value' => '',
+                    'currency' => 'USD',
+                    'items' => [
+                                'item_id' =>  $this->cart[$key]['id'],
+                                'item_name' => $product->get('pagetitle'),
+                                'coupon' => '',
+                                'discount' => '',
+                                'affiliation' => '',
+                                'item_brand' => '',
+                                'item_category' => $item_category,
+                                'item_variant' => '',
+                                'price' =>  $this->cart[$key]['price'],
+                                'currency' => 'USD',
+                                'quantity' => $this->cart[$key]['count'],
+                    ],
+                ];
+            }else{
+                $analitics = [];
+            }
+            //!analitics
+                    
             unset($this->cart[$key]);
             
             //удаление айс бокс при удаление токсинов
@@ -148,9 +208,52 @@ class myCartHandler extends msCartHandler {
                 return $this->error($response['message']);
             }
 
-            return $this->success('ms2_cart_remove_success', $this->status());
+            return $this->success('ms2_cart_remove_success', array_merge ($this->status(), ['analitics' => $analitics]));
         } else {
             return $this->error('ms2_cart_remove_error');
+        }
+    }
+    
+    public function change($key, $count)
+    {
+        $status = array();
+        if (array_key_exists($key, $this->cart)) {
+            if ($count <= 0) {
+                return $this->remove($key);
+            } else {
+                if ($count > $this->config['max_count']) {
+                    return $this->error('ms2_cart_add_err_count', $this->status(), array('count' => $count));
+                } else {
+                    $response = $this->ms2->invokeEvent(
+                        'msOnBeforeChangeInCart',
+                        array('key' => $key, 'count' => $count, 'cart' => $this)
+                    );
+                    if (!$response['success']) {
+                        return $this->error($response['message']);
+                    }
+
+                    $count = $response['data']['count'];
+                    $this->cart[$key]['count'] = $count;
+                    $response = $this->ms2->invokeEvent(
+                        'msOnChangeInCart',
+                        array('key' => $key, 'count' => $count, 'cart' => $this)
+                    );
+                    if (!$response['success']) {
+                        return $this->error($response['message']);
+                    }
+                    $status['key'] = $key;
+                    $status['cost'] = $count * $this->cart[$key]['price'];
+                    
+                }
+            }
+
+            return $this->success(
+                'ms2_cart_change_success',
+                $this->status($status),
+                array('count' => $count)
+            );
+        } else {
+            return $this->error('ms2_cart_change_error', $this->status($status));
         }
     }
     
